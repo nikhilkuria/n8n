@@ -5,7 +5,7 @@ import type { FindManyOptions, FindOptionsWhere, SelectQueryBuilder } from '@n8n
 import { DataSource, In, Like, Not, QueryFailedError } from '@n8n/typeorm';
 import type { QueryDeepPartialEntity } from '@n8n/typeorm/query-builder/QueryPartialEntity';
 
-import { UserError } from 'n8n-workflow';
+import { UnexpectedError, UserError } from 'n8n-workflow';
 
 import {
 	CredentialsEntity,
@@ -233,6 +233,42 @@ export class CredentialsRepository extends BaseRepository<CredentialsEntity> {
 	): Promise<void> {
 		assertClearedFor(ctx.policyCleared, 'credentialSave', { type: 'credential', id });
 		await this.managerFor(ctx).update(CredentialsEntity, id, content);
+	}
+
+	/**
+	 * Upserts an imported credential by id, gated on a `credentialSave` clearance.
+	 * A row that replaces a stored one binds to its id; a new row binds to its type.
+	 *
+	 * @returns the id of the row written, which the caller needs when the import supplied none.
+	 */
+	async upsertImportedContent(
+		credential: Partial<CredentialsEntity>,
+		replacesStored: boolean,
+		ctx: OperationContext,
+	): Promise<string> {
+		if (replacesStored) {
+			if (!credential.id) throw new UnexpectedError('A replacing import must carry the id');
+			assertClearedFor(ctx.policyCleared, 'credentialSave', {
+				type: 'credential',
+				id: credential.id,
+			});
+		} else {
+			if (!credential.type) throw new UnexpectedError('A new imported credential needs a type');
+			assertClearedFor(
+				ctx.policyCleared,
+				'credentialSave',
+				credentialContentSubject({ type: credential.type }),
+			);
+		}
+
+		const result = await this.managerFor(ctx).upsert(CredentialsEntity, credential, ['id']);
+		const id: unknown = credential.id ?? result.identifiers.at(0)?.id;
+
+		if (typeof id !== 'string') {
+			throw new UnexpectedError('Upsert of an imported credential returned no id');
+		}
+
+		return id;
 	}
 
 	async saveInstanceCredential(
