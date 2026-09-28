@@ -30,6 +30,7 @@ import {
 	type AgentActor,
 	type AgentSidecarChanges,
 } from './agent-modification-telemetry.service';
+import { AgentPolicyService } from './agent-policy.service';
 import { AgentRuntimeCacheService } from './agent-runtime-cache.service';
 import { AgentSetupCompletionService } from './agent-setup-completion.service';
 import { AgentUpdateBroadcaster } from './agent-update-broadcaster';
@@ -110,6 +111,7 @@ export class AgentPublishService {
 		private readonly setupCompletionService: AgentSetupCompletionService,
 		private readonly modificationTelemetry: AgentModificationTelemetryService,
 		private readonly agentUpdateBroadcaster: AgentUpdateBroadcaster,
+		private readonly agentPolicyService: AgentPolicyService,
 	) {}
 
 	/** `pushRef`: push connection of the tab that made the change; excluded from the `agentUpdated` broadcast. */
@@ -183,6 +185,10 @@ export class AgentPublishService {
 		tasks: ReadonlyMap<string, AgentTask>,
 		targetHistory?: AgentHistory,
 	): Promise<ValidAgentConfigValidationResponse> {
+		// Before validation, so a refusal names the violations instead of a generic error.
+		const schema = targetHistory ? targetHistory.schema : agent.schema;
+		if (schema) await this.agentPolicyService.enforcePublish(projectId, agent.id, schema);
+
 		const credentialProvider = new AgentsCredentialProvider(
 			this.credentialsService,
 			projectId,
@@ -363,6 +369,7 @@ export class AgentPublishService {
 		const previousSchema = agent.schema;
 		const previousTools = agent.tools ?? {};
 		const previousSkills = agent.skills ?? {};
+		await this.enforceRevertPolicy(agent, projectId, activeVersion.schema);
 
 		let tasksChanged = false;
 		await this.agentRepository.manager.transaction(async (trx) => {
@@ -406,17 +413,15 @@ export class AgentPublishService {
 		const previousTools = agent.tools ?? {};
 		const previousSkills = agent.skills ?? {};
 
+		// Loaded outside the transaction so the policy check can read: history rows never change.
+		const target = await this.agentHistoryRepository.findByVersionAndAgentId(versionId, agentId);
+		if (!target) {
+			throw new NotFoundError(`Version "${versionId}" not found`);
+		}
+		await this.enforceRevertPolicy(agent, projectId, target.schema);
+
 		let tasksChanged = false;
 		await this.agentRepository.manager.transaction(async (trx) => {
-			const target = await this.agentHistoryRepository.findByVersionAndAgentId(
-				versionId,
-				agentId,
-				trx,
-			);
-			if (!target) {
-				throw new NotFoundError(`Version "${versionId}" not found`);
-			}
-
 			agent.schema = target.schema ? deepCopy(target.schema) : null;
 			agent.tools = deepCopy(target.tools ?? {});
 			agent.skills = deepCopy(target.skills ?? {});
@@ -445,6 +450,12 @@ export class AgentPublishService {
 			versionId,
 		});
 		return agent;
+	}
+
+	/** A revert writes an old version back as the draft, so it is policed as a save. */
+	private async enforceRevertPolicy(agent: Agent, projectId: string, schema: Agent['schema']) {
+		if (!schema) return;
+		await this.agentPolicyService.enforceSave(projectId, agent.id, schema, agent.schema);
 	}
 
 	/**

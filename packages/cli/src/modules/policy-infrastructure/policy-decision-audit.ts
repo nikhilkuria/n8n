@@ -47,6 +47,9 @@ export type PolicyDecisionAudit = {
 	/** `null` for a create, which has no id yet — read `workflowName` instead. */
 	workflowId?: string | null;
 	workflowName?: string;
+	/** Same rule as `workflowId`: `null` for a create. */
+	agentId?: string | null;
+	agentName?: string;
 	/** `null` for a credential create, which has no id yet — read `credentialType` instead. */
 	credentialId?: string | null;
 	credentialType?: string;
@@ -101,10 +104,16 @@ function targetOf(context: AnyPolicyContext) {
 		};
 	}
 
+	const projectId = 'targetProjectId' in context ? context.targetProjectId : context.projectId;
+
+	if (context.workflow.artifactKind === 'agent') {
+		return { agentId: policedWorkflowId(context), agentName: context.workflow.name, projectId };
+	}
+
 	return {
 		workflowId: policedWorkflowId(context),
 		workflowName: context.workflow.name,
-		projectId: 'targetProjectId' in context ? context.targetProjectId : context.projectId,
+		projectId,
 	};
 }
 
