@@ -1,0 +1,19 @@
+version: 1
+source: linear
+workspace:
+  id: 1c35bbc6-9cd4-427e-8bc5-e5d370a9869f
+  name: n8n
+scope:
+  teams:
+    - id: 863bd45e-548f-485c-b152-9274e98136e7
+      name: Adore
+      key: ADO
+      teamId: 863bd45e-548f-485c-b152-9274e98136e7
+      teamKey: ADO
+      url: https://linear.app/n8n/team/ADO
+  projects: []
+  documents: []
+  initiatives: []
+policy:
+  customerRequests: limited
+  githubLinks: references_only
